@@ -607,7 +607,11 @@ def export_to_json(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    mcp.run()
+    port = os.environ.get("PORT")
+    if port:
+        mcp.run(transport="sse", host="0.0.0.0", port=int(port))
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

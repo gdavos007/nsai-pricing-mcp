@@ -1,0 +1,8 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python -m nsai_pricing_mcp.server"
+healthcheckPath = "/sse"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
