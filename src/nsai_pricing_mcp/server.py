@@ -22,6 +22,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# Load a local .env for development convenience (e.g. EIA_API_KEY).
+# override=False means real environment variables (Railway, CI, shell exports)
+# always win — .env only fills in values that aren't already set. No-op if
+# python-dotenv isn't installed or no .env file exists.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+except ImportError:
+    pass
+
 from mcp.server.fastmcp import FastMCP
 
 from .eia_fetcher import fetch_all as _eia_fetch_all, KEY_ENV
