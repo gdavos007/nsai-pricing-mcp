@@ -256,6 +256,10 @@ def _extract_first_day_of_month(series: pd.Series) -> pd.Series:
 
 def _resolve_key(api_key: Optional[str]) -> str:
     key = api_key or os.environ.get(KEY_ENV, "")
+    # Defensively strip whitespace and surrounding quotes — a common mistake is
+    # pasting the value with the quotes from a .env line (EIA_API_KEY="...") or a
+    # stray space into a hosting dashboard, which EIA then rejects.
+    key = key.strip().strip("\"'").strip()
     if not key:
         raise EnvironmentError(
             "EIA API key not found.\n\n"
