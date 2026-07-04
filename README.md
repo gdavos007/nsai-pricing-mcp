@@ -1,6 +1,6 @@
 # nsai-pricing-mcp
 
-MCP server, pandas client, and CoWork skill for oil & gas pricing data
+MCP server and pandas client for oil & gas pricing data
 equivalent to what Netherland, Sewell & Associates (NSAI) publishes monthly.
 
 Data is pulled **live from the U.S. Energy Information Administration (EIA)
@@ -29,10 +29,9 @@ annual 10-K / 20-F filings.
 nsai-pricing-mcp/
 ├── pyproject.toml          # package definition and dependencies
 ├── requirements.txt        # pip install list
+├── railway.toml            # Railway deploy config (SSE transport)
+├── Procfile                # process definition for the hosted server
 ├── README.md
-│
-├── skills/
-│   └── nsai-pricing.md     # CoWork skill (upload to Customize > Skills)
 │
 └── src/
     └── nsai_pricing_mcp/
@@ -71,7 +70,7 @@ That's the only setup step. Every data call after this is fully automated.
 
 ---
 
-## Three ways to use it
+## Two ways to use it
 
 ### 1. Python / pandas — for Reservoir Engineers
 
@@ -95,23 +94,52 @@ client.to_csv("./output/")
 
 ### 2. MCP server — for Claude Code / AI agents
 
-Add to `~/.claude.json`:
+Register the server with Claude Code using the `claude mcp add` command.
+Pick the option that matches how you're running it.
 
-```json
-{
-  "mcpServers": {
-    "nsai-pricing": {
-      "command": "python",
-      "args": ["-m", "nsai_pricing_mcp.server"],
-      "env": {
-        "EIA_API_KEY": "your_key_here"
-      }
-    }
-  }
-}
+#### A. Connect to a hosted (Railway) deployment over SSE — recommended
+
+If the server is deployed to Railway (the repo includes `railway.toml` and a
+`Procfile`), the hosted instance holds its own `EIA_API_KEY`, so clients don't
+pass a key.
+Register it with one command:
+
+```bash
+claude mcp add --transport sse epv-pricing https://<your-railway-domain>/sse
 ```
 
-Restart Claude Code. Available tools:
+- The registration name (`epv-pricing`) is an arbitrary local alias — choose anything.
+- **Scope:** by default it's saved to your local, per-project config. Add
+  `--scope user` to make it available in every directory, or `--scope project`
+  to write a committed `.mcp.json` that collaborators share.
+
+Verify the connection:
+
+```bash
+claude mcp list
+# epv-pricing: https://<your-railway-domain>/sse (SSE) - ✔ Connected
+```
+
+The tools load at the start of a Claude Code session — start a fresh session
+in the directory where you registered it, then just ask questions like
+*"What's the current SEC price for oil and gas?"*
+
+#### B. Run the server locally over stdio
+
+Have Claude Code launch the server as a subprocess (no hosting needed). This
+uses your local `EIA_API_KEY`:
+
+```bash
+claude mcp add epv-pricing \
+  --env EIA_API_KEY=your_key_here \
+  -- python -m nsai_pricing_mcp.server
+```
+
+This writes an entry to `~/.claude.json`. Restart Claude Code to pick it up.
+
+To remove a server: `claude mcp remove epv-pricing`.
+
+#### Available tools
 
 | Tool | Description |
 |------|-------------|
@@ -124,18 +152,6 @@ Restart Claude Code. Available tools:
 | `get_monthly_index_prices` | Last N months of spot + rolling averages |
 | `search_prices_by_date` | Date-range query |
 | `export_to_json` | Dump to JSON for Snowflake COPY or pandas |
-
-### 3. CoWork skill — for non-developers
-
-1. Open Claude Desktop → **Customize > Skills**
-2. Upload `skills/nsai-pricing.md`
-3. In any CoWork session, just say:
-   - *"What's the current SEC oil price?"*
-   - *"Give me the last 12 months of WTI and Henry Hub prices"*
-   - *"Export NSAI pricing data to Excel for my economics model"*
-
-Claude auto-invokes the skill, pulls from EIA, and delivers results.
-No commands, no spreadsheets, no file paths.
 
 ---
 
