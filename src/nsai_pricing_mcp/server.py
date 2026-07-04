@@ -650,7 +650,7 @@ def main() -> None:
         # completed response, so it is unusable as a platform healthcheck
         # target — point railway.toml's healthcheckPath at /health instead.
         import uvicorn
-        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.responses import PlainTextResponse
         from starlette.routing import Route
 
         mcp.settings.host = "0.0.0.0"
@@ -658,33 +658,7 @@ def main() -> None:
 
         app = mcp.sse_app()
 
-        async def health(request):
-            # /health?diag=1 reports readiness WITHOUT leaking secrets: only
-            # presence + length of the key, and the NAMES (never values) of any
-            # env vars that look key-ish — enough to catch a misnamed variable.
-            if request.query_params.get("diag") == "1":
-                raw = os.environ.get(KEY_ENV, "")
-                names = sorted(
-                    k for k in os.environ
-                    if any(t in k.upper() for t in ("EIA", "API", "KEY"))
-                )
-                # Safe: the real key is pure alphanumeric, so exposing only the
-                # ordinals of NON-alphanumeric chars reveals contamination
-                # (quote=34, space=32, newline=10…) without leaking the key.
-                contaminants = sorted({ord(c) for c in raw if not c.isalnum()})
-                from .eia_fetcher import _resolve_key
-                try:
-                    resolved = _resolve_key(None)
-                    resolved_len, resolved_alnum = len(resolved), resolved.isalnum()
-                except Exception:
-                    resolved_len, resolved_alnum = 0, False
-                return JSONResponse({
-                    "raw_len": len(raw),
-                    "resolved_len": resolved_len,        # 40 == clean key
-                    "resolved_is_alnum": resolved_alnum,
-                    "nonalnum_char_ordinals": contaminants,
-                    "keyish_env_var_names": names,
-                })
+        async def health(_request):
             return PlainTextResponse("ok")
 
         app.router.routes.append(Route("/health", health, methods=["GET"]))
