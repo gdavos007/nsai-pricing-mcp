@@ -609,7 +609,11 @@ def export_to_json(
 def main() -> None:
     port = os.environ.get("PORT")
     if port:
-        mcp.run(transport="sse", host="0.0.0.0", port=int(port))
+        # Railway (and similar) inject PORT — serve over SSE on 0.0.0.0.
+        # Host/port are configured via FastMCP settings; run() only takes transport.
+        mcp.settings.host = "0.0.0.0"
+        mcp.settings.port = int(port)
+        mcp.run(transport="sse")
     else:
         mcp.run()
 
