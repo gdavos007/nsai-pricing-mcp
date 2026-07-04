@@ -189,6 +189,7 @@ EIA publishes these as daily spot prices. The client derives:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `EIA_API_KEY` | Yes | Free EIA Open Data API key |
+| `EIA_CACHE_TTL_SECONDS` | No | In-process TTL for fetched EIA data (default: `21600` = 6h; set `0` to disable caching) |
 | `NSAI_CACHE_DIR` | No | Cache directory (default: `~/.nsai_pricing_cache`) |
 
 ---

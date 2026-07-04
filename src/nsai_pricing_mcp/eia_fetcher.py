@@ -18,12 +18,17 @@ Or pass it explicitly:
 
 from __future__ import annotations
 
+import logging
 import os
-from datetime import date, datetime, timedelta
+import random
+import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -31,6 +36,26 @@ import pandas as pd
 
 EIA_BASE = "https://api.eia.gov/v2"
 KEY_ENV  = "EIA_API_KEY"
+
+# --- Caching ---------------------------------------------------------------
+# Serve previously-fetched data for this long before calling EIA again. EIA
+# daily spot data updates at most once per business day, so a multi-hour TTL
+# removes nearly all redundant calls. Override with EIA_CACHE_TTL_SECONDS
+# (set 0 to disable caching entirely).
+CACHE_TTL_ENV = "EIA_CACHE_TTL_SECONDS"
+DEFAULT_CACHE_TTL_SECONDS = 6 * 60 * 60  # 6 hours
+
+# start_year -> {"ts": <monotonic>, "fetched_at": <iso>, "frames": {...}, "errors": {...}}
+_CACHE: dict[int, dict] = {}
+
+# --- Retry / backoff -------------------------------------------------------
+# Transient EIA failures (rate limiting, brief 5xx, network blips) are retried
+# with bounded exponential backoff. Non-retryable statuses (404, 401, ...) still
+# fail fast via raise_for_status().
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 4
+_BACKOFF_BASE_SECONDS = 1.0
+_BACKOFF_CAP_SECONDS = 16.0
 
 # EIA v2 routes and facets for each commodity.
 # Verify / explore at: https://www.eia.gov/opendata/browser/
@@ -63,9 +88,90 @@ SEC_START_YEAR = 2010
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def _resolve_ttl(cache_ttl: Optional[int]) -> int:
+    """TTL seconds: explicit arg > EIA_CACHE_TTL_SECONDS env > default. 0 disables."""
+    if cache_ttl is not None:
+        return max(0, int(cache_ttl))
+    env = os.environ.get(CACHE_TTL_ENV, "").strip()
+    if env.isdigit():
+        return int(env)
+    return DEFAULT_CACHE_TTL_SECONDS
+
+
+def fetch_all_with_meta(
+    api_key: Optional[str] = None,
+    start_year: int = SEC_START_YEAR,
+    force_refresh: bool = False,
+    cache_ttl: Optional[int] = None,
+) -> tuple[dict[str, pd.DataFrame], dict]:
+    """
+    Like fetch_all(), but also returns fetch metadata:
+      {served_from_cache, fetched_at, cache_age_seconds, cache_ttl_seconds, warnings}
+
+    Results are cached in-process per start_year for `cache_ttl` seconds
+    (default from EIA_CACHE_TTL_SECONDS, else 6h). Pass force_refresh=True or
+    cache_ttl=0 to bypass the cache and refetch.
+
+    `warnings` maps any series that failed all retries to its error string;
+    the fetch still succeeds as long as at least one series was retrieved.
+    """
+    ttl = _resolve_ttl(cache_ttl)
+    now = time.monotonic()
+
+    entry = _CACHE.get(start_year)
+    if entry and not force_refresh and ttl > 0 and (now - entry["ts"]) < ttl:
+        return entry["frames"], {
+            "served_from_cache": True,
+            "fetched_at": entry["fetched_at"],
+            "cache_age_seconds": round(now - entry["ts"], 1),
+            "cache_ttl_seconds": ttl,
+            "warnings": entry["errors"],
+        }
+
+    key = _resolve_key(api_key)
+    start = f"{start_year}-01-01"
+
+    raw: dict[str, pd.Series] = {}
+    errors: dict[str, str] = {}
+    for name, spec in _SERIES.items():
+        try:
+            raw[name] = _fetch_daily_series(key, spec, start)
+        except Exception as exc:
+            errors[name] = str(exc)
+            logger.warning("Could not fetch %s: %s", name, exc)
+
+    if not raw:
+        detail = "; ".join(f"{k}: {v}" for k, v in errors.items())
+        raise RuntimeError(
+            "No data retrieved from EIA. Check your API key and network."
+            + (f" Details — {detail}" if detail else "")
+        )
+
+    frames = {
+        "monthly_index": _build_monthly_index(raw),
+        "first_day"    : _build_first_day(raw),
+    }
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    _CACHE[start_year] = {
+        "ts": now,
+        "fetched_at": fetched_at,
+        "frames": frames,
+        "errors": errors,
+    }
+    return frames, {
+        "served_from_cache": False,
+        "fetched_at": fetched_at,
+        "cache_age_seconds": 0.0,
+        "cache_ttl_seconds": ttl,
+        "warnings": errors,
+    }
+
+
 def fetch_all(
     api_key: Optional[str] = None,
     start_year: int = SEC_START_YEAR,
+    force_refresh: bool = False,
+    cache_ttl: Optional[int] = None,
 ) -> dict[str, pd.DataFrame]:
     """
     Pull WTI, Henry Hub, and Mont Belvieu propane daily spot prices
@@ -74,6 +180,8 @@ def fetch_all(
       - First-day-of-month prices (SEC input)
       - 12-month rolling average of first-day prices (SEC benchmark)
 
+    Cached in-process per start_year (see fetch_all_with_meta / cache_ttl).
+
     Returns
     -------
     {
@@ -81,30 +189,67 @@ def fetch_all(
       "first_day"    : DataFrame,    # mirrors NSAI 'First-Day-of-Month Prices'
     }
     """
-    key = _resolve_key(api_key)
-    start = f"{start_year}-01-01"
-
-    raw: dict[str, pd.Series] = {}
-    for name, spec in _SERIES.items():
-        try:
-            raw[name] = _fetch_daily_series(key, spec, start)
-        except Exception as exc:
-            print(f"  Warning: could not fetch {name}: {exc}")
-
-    if not raw:
-        raise RuntimeError(
-            "No data retrieved from EIA. Check your API key and network."
-        )
-
-    return {
-        "monthly_index": _build_monthly_index(raw),
-        "first_day"    : _build_first_day(raw),
-    }
+    frames, _meta = fetch_all_with_meta(
+        api_key=api_key,
+        start_year=start_year,
+        force_refresh=force_refresh,
+        cache_ttl=cache_ttl,
+    )
+    return frames
 
 
 # ---------------------------------------------------------------------------
 # EIA API call
 # ---------------------------------------------------------------------------
+
+def _retry_after_seconds(resp: httpx.Response) -> Optional[float]:
+    """Parse a numeric Retry-After header (seconds) if EIA sent one."""
+    ra = resp.headers.get("Retry-After", "").strip()
+    return float(ra) if ra.isdigit() else None
+
+
+def _backoff_sleep(seconds: float) -> None:
+    # Small jitter avoids the three series retrying in lockstep.
+    time.sleep(seconds + random.uniform(0, 0.25))
+
+
+def _get_with_retry(client: httpx.Client, url: str, params: dict) -> httpx.Response:
+    """
+    GET with bounded exponential backoff on transient failures (HTTP 429/5xx
+    and network errors), honoring a numeric Retry-After header when present.
+
+    Non-retryable responses (404, 401, ...) still raise immediately via
+    raise_for_status(), preserving fail-fast behavior for those.
+    """
+    delay = _BACKOFF_BASE_SECONDS
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            resp = client.get(url, params=params)
+        except httpx.TransportError as exc:  # timeouts, connection errors
+            last_exc = exc
+            if attempt == _MAX_ATTEMPTS:
+                raise
+            logger.warning("EIA request error (%s); retry %d/%d in %.1fs",
+                           exc, attempt, _MAX_ATTEMPTS, delay)
+            _backoff_sleep(delay)
+            delay = min(delay * 2, _BACKOFF_CAP_SECONDS)
+            continue
+
+        if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_ATTEMPTS:
+            wait = _retry_after_seconds(resp) or delay
+            logger.warning("EIA HTTP %s; retry %d/%d in %.1fs",
+                           resp.status_code, attempt, _MAX_ATTEMPTS, wait)
+            _backoff_sleep(wait)
+            delay = min(delay * 2, _BACKOFF_CAP_SECONDS)
+            continue
+
+        resp.raise_for_status()
+        return resp
+
+    # Retries exhausted on a transient network error.
+    raise last_exc if last_exc else RuntimeError("EIA request failed after retries")
+
 
 def _fetch_daily_series(
     api_key: str,
@@ -132,8 +277,7 @@ def _fetch_daily_series(
     with httpx.Client(timeout=30) as client:
         while True:
             params["offset"] = offset
-            resp = client.get(url, params=params)
-            resp.raise_for_status()
+            resp = _get_with_retry(client, url, params)
             body = resp.json()
 
             page = body.get("response", {}).get("data", [])

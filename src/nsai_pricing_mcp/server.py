@@ -35,7 +35,7 @@ except ImportError:
 
 from mcp.server.fastmcp import FastMCP
 
-from .eia_fetcher import fetch_all as _eia_fetch_all, KEY_ENV
+from .eia_fetcher import fetch_all_with_meta as _eia_fetch_all_with_meta, KEY_ENV
 from .fetcher import download_spreadsheet, get_cached_metadata, NSAI_PRICING_URL
 from .parser import (
     parse_nsai_spreadsheet,
@@ -155,7 +155,10 @@ def _err(message: str) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def fetch_latest_pricing_data(eia_api_key: Optional[str] = None) -> str:
+def fetch_latest_pricing_data(
+    eia_api_key: Optional[str] = None,
+    force_refresh: bool = False,
+) -> str:
     """
     Pull the latest WTI, Henry Hub, and Mont Belvieu pricing data
     directly from the EIA (U.S. Energy Information Administration) API.
@@ -171,12 +174,19 @@ def fetch_latest_pricing_data(eia_api_key: Optional[str] = None) -> str:
 
     Or pass it directly as eia_api_key parameter.
 
-    Returns a summary of datasets loaded and date coverage.
+    Results are cached in-process (default 6h, set via EIA_CACHE_TTL_SECONDS).
+    EIA daily data refreshes at most once per business day, so repeated calls
+    are served from cache. Pass force_refresh=True to bypass the cache and
+    pull fresh from EIA.
+
+    Returns a summary of datasets loaded, date coverage, and cache status.
     """
     global _DATA, _DATA_SOURCE
 
     try:
-        frames = _eia_fetch_all(api_key=eia_api_key)
+        frames, meta = _eia_fetch_all_with_meta(
+            api_key=eia_api_key, force_refresh=force_refresh
+        )
 
         # Convert EIA DataFrames into the same dict structure the rest
         # of the server expects (list of records + headers + sheet_type)
@@ -204,11 +214,21 @@ def fetch_latest_pricing_data(eia_api_key: Optional[str] = None) -> str:
             for name in frames
         }
 
-        return _ok({
+        payload = {
             "source"  : "U.S. Energy Information Administration (EIA)",
             "api_url" : "https://api.eia.gov/v2/",
+            "cache"   : {
+                "served_from_cache": meta["served_from_cache"],
+                "fetched_at"       : meta["fetched_at"],
+                "cache_age_seconds": meta["cache_age_seconds"],
+                "cache_ttl_seconds": meta["cache_ttl_seconds"],
+            },
             "datasets": summary,
-        })
+        }
+        # Surface any series that failed all retries instead of dropping silently.
+        if meta.get("warnings"):
+            payload["warnings"] = meta["warnings"]
+        return _ok(payload)
 
     except EnvironmentError as exc:
         return json.dumps({
