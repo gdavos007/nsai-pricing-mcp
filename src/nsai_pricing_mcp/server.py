@@ -650,7 +650,7 @@ def main() -> None:
         # completed response, so it is unusable as a platform healthcheck
         # target — point railway.toml's healthcheckPath at /health instead.
         import uvicorn
-        from starlette.responses import PlainTextResponse
+        from starlette.responses import JSONResponse, PlainTextResponse
         from starlette.routing import Route
 
         mcp.settings.host = "0.0.0.0"
@@ -658,7 +658,21 @@ def main() -> None:
 
         app = mcp.sse_app()
 
-        async def health(_request):
+        async def health(request):
+            # /health?diag=1 reports readiness WITHOUT leaking secrets: only
+            # presence + length of the key, and the NAMES (never values) of any
+            # env vars that look key-ish — enough to catch a misnamed variable.
+            if request.query_params.get("diag") == "1":
+                key = os.environ.get(KEY_ENV, "")
+                names = sorted(
+                    k for k in os.environ
+                    if any(t in k.upper() for t in ("EIA", "API", "KEY"))
+                )
+                return JSONResponse({
+                    "eia_api_key_present": bool(key),
+                    "eia_api_key_len": len(key),
+                    "keyish_env_var_names": names,
+                })
             return PlainTextResponse("ok")
 
         app.router.routes.append(Route("/health", health, methods=["GET"]))
