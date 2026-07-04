@@ -663,14 +663,26 @@ def main() -> None:
             # presence + length of the key, and the NAMES (never values) of any
             # env vars that look key-ish — enough to catch a misnamed variable.
             if request.query_params.get("diag") == "1":
-                key = os.environ.get(KEY_ENV, "")
+                raw = os.environ.get(KEY_ENV, "")
                 names = sorted(
                     k for k in os.environ
                     if any(t in k.upper() for t in ("EIA", "API", "KEY"))
                 )
+                # Safe: the real key is pure alphanumeric, so exposing only the
+                # ordinals of NON-alphanumeric chars reveals contamination
+                # (quote=34, space=32, newline=10…) without leaking the key.
+                contaminants = sorted({ord(c) for c in raw if not c.isalnum()})
+                from .eia_fetcher import _resolve_key
+                try:
+                    resolved = _resolve_key(None)
+                    resolved_len, resolved_alnum = len(resolved), resolved.isalnum()
+                except Exception:
+                    resolved_len, resolved_alnum = 0, False
                 return JSONResponse({
-                    "eia_api_key_present": bool(key),
-                    "eia_api_key_len": len(key),
+                    "raw_len": len(raw),
+                    "resolved_len": resolved_len,        # 40 == clean key
+                    "resolved_is_alnum": resolved_alnum,
+                    "nonalnum_char_ordinals": contaminants,
                     "keyish_env_var_names": names,
                 })
             return PlainTextResponse("ok")
