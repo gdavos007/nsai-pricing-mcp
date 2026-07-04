@@ -610,10 +610,27 @@ def main() -> None:
     port = os.environ.get("PORT")
     if port:
         # Railway (and similar) inject PORT — serve over SSE on 0.0.0.0.
-        # Host/port are configured via FastMCP settings; run() only takes transport.
+        #
+        # We build the SSE Starlette app ourselves (rather than mcp.run(
+        # transport="sse")) so we can attach a lightweight /health route.
+        # The /sse endpoint is a long-lived event stream that never returns a
+        # completed response, so it is unusable as a platform healthcheck
+        # target — point railway.toml's healthcheckPath at /health instead.
+        import uvicorn
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+
         mcp.settings.host = "0.0.0.0"
         mcp.settings.port = int(port)
-        mcp.run(transport="sse")
+
+        app = mcp.sse_app()
+
+        async def health(_request):
+            return PlainTextResponse("ok")
+
+        app.router.routes.append(Route("/health", health, methods=["GET"]))
+
+        uvicorn.run(app, host="0.0.0.0", port=int(port))
     else:
         mcp.run()
 

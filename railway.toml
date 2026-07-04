@@ -5,6 +5,6 @@ builder = "nixpacks"
 # PYTHONPATH=src makes the package importable even if the builder only installs
 # requirements.txt (deps) without `pip install .`-ing the project itself.
 startCommand = "PYTHONPATH=src python -m nsai_pricing_mcp.server"
-healthcheckPath = "/sse"
+healthcheckPath = "/health"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
