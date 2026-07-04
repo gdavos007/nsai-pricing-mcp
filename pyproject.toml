@@ -9,7 +9,7 @@ description = "MCP server for Netherland, Sewell & Associates (NSAI) oil & gas p
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp==1.28.1",  # pinned: SSE Host-header validation / transport_security API is version-sensitive
     "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
     "openpyxl>=3.1.0",

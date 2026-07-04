@@ -45,8 +45,30 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # FastMCP server
 # ---------------------------------------------------------------------------
 
+def _transport_security() -> "TransportSecuritySettings":
+    """
+    Configure DNS-rebinding (Host/Origin) protection for the HTTP transports.
+
+    Recent MCP SDKs validate the Host header and reject any request whose host
+    isn't in an allowlist (returns 421 "Invalid Host header"). Behind a platform
+    proxy like Railway the external host varies by deploy and can't be wildcarded
+    (the SDK only supports exact host or `:*` port patterns), so:
+
+      * If MCP_ALLOWED_HOSTS is set (comma-separated exact hosts), lock down to it.
+      * Otherwise disable DNS-rebinding protection — it primarily guards localhost
+        servers from browser-based attacks and adds little for a public endpoint.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    allowed = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+    if allowed:
+        return TransportSecuritySettings(allowed_hosts=allowed, allowed_origins=allowed)
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
 mcp = FastMCP(
     name="nsai-pricing",
+    transport_security=_transport_security(),
     instructions="""
 You have access to oil and gas pricing data published by Netherland, Sewell &
 Associates, Inc. (NSAI) — a leading independent petroleum engineering firm.
