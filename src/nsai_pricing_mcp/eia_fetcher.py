@@ -37,15 +37,15 @@ KEY_ENV  = "EIA_API_KEY"
 _SERIES = {
     "wti": {
         "route"      : "petroleum/pri/spt/data/",
-        "facets"     : {"product": ["EPCWTI"], "duoarea": ["RWC"]},
+        "facets"     : {"product": ["EPCWTI"], "duoarea": ["YCUOK"]},
         "label"      : "WTI Crude Oil ($/Bbl)",
-        "description": "Cushing, OK WTI Spot Price FOB — daily",
+        "description": "Cushing, OK WTI Spot Price FOB — daily (series RWTC)",
     },
     "henry_hub": {
-        "route"      : "natural-gas/pri/sum/dcus/nus/d/data/",
-        "facets"     : {},   # endpoint already scoped to Henry Hub national
+        "route"      : "natural-gas/pri/fut/data/",
+        "facets"     : {"series": ["RNGWHHD"]},   # Henry Hub daily spot
         "label"      : "Henry Hub ($/MMBtu)",
-        "description": "Henry Hub Natural Gas Spot Price — daily",
+        "description": "Henry Hub Natural Gas Spot Price — daily (series RNGWHHD)",
     },
     "mb_propane": {
         "route"      : "petroleum/pri/spt/data/",

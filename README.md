@@ -143,8 +143,8 @@ No commands, no spreadsheets, no file paths.
 
 | Commodity | EIA Series | Notes |
 |-----------|-----------|-------|
-| WTI Crude Oil | `petroleum/pri/spt` — EPCWTI, RWC | Cushing OK spot, $/Bbl |
-| Henry Hub Gas | `natural-gas/pri/sum/dcus/nus/d` | Henry Hub spot, $/MMBtu |
+| WTI Crude Oil | `petroleum/pri/spt` — EPCWTI, YCUOK | Cushing OK spot (series RWTC), $/Bbl |
+| Henry Hub Gas | `natural-gas/pri/fut` — RNGWHHD | Henry Hub spot, $/MMBtu |
 | Mont Belvieu Propane | `petroleum/pri/spt` — EPLLPA, Y44MB | Enterprise terminal, $/Gal |
 
 EIA publishes these as daily spot prices. The client derives:
