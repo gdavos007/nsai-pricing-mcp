@@ -7,6 +7,9 @@ Data is pulled **live from the U.S. Energy Information Administration (EIA)
 Open Data API** — the same primary source NSAI uses. No spreadsheet download.
 No scraping. Always current.
 
+For product requirements, user stories, and architecture, see
+[docs/PRD.md](docs/PRD.md).
+
 ---
 
 ## What data is available?
@@ -32,6 +35,8 @@ nsai-pricing-mcp/
 ├── railway.toml            # Railway deploy config (SSE transport)
 ├── Procfile                # process definition for the hosted server
 ├── README.md
+├── docs/
+│   └── PRD.md              # product requirements document
 │
 └── src/
     └── nsai_pricing_mcp/
